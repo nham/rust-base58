@@ -94,11 +94,16 @@ mod tests {
     #[test]
     fn test_from_base58_basic() {
         assert_eq!("".from_base58().unwrap(), b"");
-        assert_eq!("z".from_base58().unwrap(), b"9");
-        assert_eq!("21".from_base58().unwrap(), b":");
-        assert_eq!("2g".from_base58().unwrap(), b"a");
-        assert_eq!("8Qq".from_base58().unwrap(), b"ab");
-        assert_eq!("ZiCa".from_base58().unwrap(), b"abc");
+        assert_eq!("Z".from_base58().unwrap(), &[32]);
+        assert_eq!("n".from_base58().unwrap(), &[45]);
+        assert_eq!("q".from_base58().unwrap(), &[48]);
+        assert_eq!("r".from_base58().unwrap(), &[49]);
+        assert_eq!("z".from_base58().unwrap(), &[57]);
+        assert_eq!("4SU".from_base58().unwrap(), &[45, 49]);
+        assert_eq!("4k8".from_base58().unwrap(), &[49, 49]);
+        assert_eq!("ZiCa".from_base58().unwrap(), &[97, 98, 99]);
+        assert_eq!("3mJr7AoUXx2Wqd".from_base58().unwrap(), b"1234598760");
+        assert_eq!("3yxU3u1igY8WkgtjK92fbJQCd4BZiiT1v25f".from_base58().unwrap(), b"abcdefghijklmnopqrstuvwxyz");
     }
 
     #[test]
@@ -108,8 +113,16 @@ mod tests {
 
     #[test]
     fn test_from_base58_invalid_char() {
-        assert!("AC0".from_base58().is_err());
-        assert!("s5<".from_base58().is_err());
+        assert!("0".from_base58().is_err());
+        assert!("O".from_base58().is_err());
+        assert!("I".from_base58().is_err());
+        assert!("l".from_base58().is_err());
+        assert!("3mJr0".from_base58().is_err());
+        assert!("O3yxU".from_base58().is_err());
+        assert!("3sNI".from_base58().is_err());
+        assert!("4kl8".from_base58().is_err());
+        assert!("s!5<".from_base58().is_err());
+        assert!("t$@mX<*".from_base58().is_err());
     }
 
     #[test]
