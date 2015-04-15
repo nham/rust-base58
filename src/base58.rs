@@ -1,5 +1,6 @@
 use num::bigint::ToBigUint;
 use num::{BigUint, Zero, One};
+use num::traits::ToPrimitive;
 use std::fmt;
 
 pub use self::FromBase58Error::*;
@@ -13,8 +14,7 @@ static FLICKR_ALPHA: &'static[u8] = b"123456789\
                                       ABCDEFGHJKLMNPQRSTUVWXYZ";
 
 /// A trait for converting base58-encoded values
-// TODO: This should incorporate the alphabet used as an associated constant. 
-// However, associated constants are not implemented in Rust yet. There is a
+// TODO: This should incorporate the alphabet used as an associated constant.  However, associated constants are not implemented in Rust yet. There is a
 // PR though: https://github.com/rust-lang/rust/pull/23606
 pub trait FromBase58 {
     /// Converts the value of `self`, interpreted as base58 encoded data,
@@ -87,9 +87,44 @@ impl FromBase58 for [u8] {
 }
 
 
+/// A trait for converting a value to base58 encoding.
+pub trait ToBase58 {
+    /// Converts the value of `self` to a base-58 value, returning the owned
+    /// string.
+    fn to_base58(&self) -> String;
+}
+
+impl ToBase58 for [u8] {
+    // This function has to read in the entire byte slice and convert it to a
+    // (big) int before creating the string. There's no way to incrementally read
+    // the slice and create parts of the base58 string. Example:
+    //   [1, 33] should be "5z"
+    //   [1, 34] should be "61"
+    // so by reading "1", no way to know if first character should be 5 or 6
+    // without reading the rest
+    fn to_base58(&self) -> String {
+        let radix = 58.to_biguint().unwrap();
+        let mut x = BigUint::from_bytes_be(&self);
+        let mut ans = vec![];
+        while x > Zero::zero() {
+            let rem = (&x % &radix).to_usize().unwrap();
+            ans.push(BTC_ALPHA[rem]);
+            x = &x / &radix;
+        }
+
+        // take care of leading zeros
+        for _ in self.iter().take_while(|&x| *x == 0) {
+            ans.push(BTC_ALPHA[0]);
+        }
+        ans.reverse();
+        String::from_utf8(ans).unwrap()
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
-    use base58::FromBase58;
+    use base58::{FromBase58, ToBase58};
 
     #[test]
     fn test_from_base58_basic() {
@@ -131,5 +166,43 @@ mod tests {
         assert_eq!("11ZiCa".from_base58().unwrap(), b"\0\0abc");
         assert_eq!("111ZiCa".from_base58().unwrap(), b"\0\0\0abc");
         assert_eq!("1111ZiCa".from_base58().unwrap(), b"\0\0\0\0abc");
+    }
+
+    #[test]
+    fn test_to_base58_basic() {
+        assert_eq!(b"".to_base58(), "");
+        assert_eq!(&[32].to_base58(), "Z");
+        assert_eq!(&[45].to_base58(), "n");
+        assert_eq!(&[48].to_base58(), "q");
+        assert_eq!(&[49].to_base58(), "r");
+        assert_eq!(&[57].to_base58(), "z");
+        assert_eq!(&[45, 49].to_base58(), "4SU");
+        assert_eq!(&[49, 49].to_base58(), "4k8");
+        assert_eq!(b"abc".to_base58(), "ZiCa");
+        assert_eq!(b"1234598760".to_base58(), "3mJr7AoUXx2Wqd");
+        assert_eq!(b"abcdefghijklmnopqrstuvwxyz".to_base58(), "3yxU3u1igY8WkgtjK92fbJQCd4BZiiT1v25f");
+    }
+
+    #[test]
+    fn test_to_base58_initial_zeros() {
+        assert_eq!(b"\0abc".to_base58(), "1ZiCa");
+        assert_eq!(b"\0\0abc".to_base58(), "11ZiCa");
+        assert_eq!(b"\0\0\0abc".to_base58(), "111ZiCa");
+        assert_eq!(b"\0\0\0\0abc".to_base58(), "1111ZiCa");
+    }
+
+    #[test]
+    fn test_base58_random() {
+        use rand::{thread_rng, Rng};
+
+        for _ in 0..200 {
+            let times = thread_rng().gen_range(1, 100);
+            let v = thread_rng().gen_iter::<u8>().take(times)
+                                .collect::<Vec<_>>();
+            assert_eq!(v.to_base58()
+                        .from_base58()
+                        .unwrap(),
+                       v);
+        }
     }
 }
