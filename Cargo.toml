@@ -1,0 +1,7 @@
+[package]
+name = "rust-base58"
+version = "0.0.1"
+authors = ["Nick Hamann <nick@wabbo.org>"]
+
+[dependencies]
+num = "*"
