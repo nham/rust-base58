@@ -80,7 +80,9 @@ impl FromBase58 for [u8] {
             r.push(0);
         }
         if x > Zero::zero() {
-            r.append(&mut x.to_bytes_be());
+            for eachbyte in x.to_bytes_be() {
+              r.push(eachbyte);
+            }
         }
         Ok(r)
     }
