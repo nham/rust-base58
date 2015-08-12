@@ -1,5 +1,3 @@
-#![feature(collections)]
-
 extern crate num;
 #[cfg(test)] extern crate rand;
 
