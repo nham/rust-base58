@@ -1,9 +1,11 @@
 extern crate num;
+extern crate sha2;
 #[cfg(test)] extern crate rand;
 
 use num::bigint::ToBigUint;
 use num::{BigUint, Zero, One};
 use num::traits::ToPrimitive;
+use sha2::{Sha256, Digest};
 use std::fmt;
 
 pub use self::FromBase58Error::*;
@@ -21,14 +23,22 @@ pub trait FromBase58 {
     /// Converts the value of `self`, interpreted as base58 encoded data,
     /// into an owned vector of bytes, returning the vector.
     fn from_base58(&self) -> Result<Vec<u8>, FromBase58Error>;
+
+    /// Converts the value of `self`, interpreted as base58check encoded data,
+    /// into an owned vector of bytes, returning the vector.
+    fn from_base58_check(&self) -> Result<Vec<u8>, FromBase58Error>;
 }
 
 
-/// Errors that can occur when decoding a base58-encoded string
+/// Errors that can occur when decoding a base58-encoded string or when decoding a base58check-encoded string
 #[derive(Clone, Copy)]
 pub enum FromBase58Error {
     /// The input contained a character not part of the base58 alphabet
     InvalidBase58Byte(u8, usize),
+    /// The checksum was not correct
+    InvalidBase58Checksum([u8; 4], [u8; 4]),
+    /// The checksum was not present
+    NoBase58Checksum
 }
 
 impl fmt::Debug for FromBase58Error {
@@ -36,6 +46,10 @@ impl fmt::Debug for FromBase58Error {
         match *self {
             InvalidBase58Byte(ch, idx) =>
                 write!(f, "Invalid character '{}' at position {}", ch, idx),
+            InvalidBase58Checksum(chk, expected) =>
+                write!(f, "Invalid checksum '{:?}', expected {:?}", &chk, &expected),
+            NoBase58Checksum =>
+                write!(f, "No checksum present")
         }
     }
 }
@@ -46,11 +60,13 @@ impl fmt::Display for FromBase58Error {
     }
 }
 
-
-
 impl FromBase58 for str {
     fn from_base58(&self) -> Result<Vec<u8>, FromBase58Error> {
         self.as_bytes().from_base58()
+    }
+
+    fn from_base58_check(&self) -> Result<Vec<u8>, FromBase58Error> {
+        self.as_bytes().from_base58_check()
     }
 }
 
@@ -86,6 +102,29 @@ impl FromBase58 for [u8] {
         }
         Ok(r)
     }
+
+    fn from_base58_check(&self) -> Result<Vec<u8>, FromBase58Error> {
+        let decoded = self.from_base58()?;
+        let length = decoded.len();
+        if length < 4 {
+            return Err(NoBase58Checksum)
+        }
+        let (content, check) = decoded.split_at(length-4);
+
+        let first_hash = Sha256::digest(&content);
+        let second_hash = Sha256::digest(&first_hash);
+        let (expected_hash, _) = second_hash.split_at(4);
+
+        if check != expected_hash {
+            let mut a: [u8; 4] = Default::default();
+            a.copy_from_slice(&check[..]);
+            let mut b: [u8; 4] = Default::default();
+            b.copy_from_slice(&expected_hash[..]);
+            return Err(InvalidBase58Checksum(a, b))
+        } else {
+            return Ok(content.to_vec())
+        }
+    }
 }
 
 
@@ -94,6 +133,10 @@ pub trait ToBase58 {
     /// Converts the value of `self` to a base-58 value, returning the owned
     /// string.
     fn to_base58(&self) -> String;
+
+    /// Converts the value of `self` to a base-58 check value, returning the owned
+    /// string.
+    fn to_base58_check(&self) -> String;
 }
 
 impl ToBase58 for [u8] {
@@ -121,12 +164,33 @@ impl ToBase58 for [u8] {
         ans.reverse();
         String::from_utf8(ans).unwrap()
     }
+
+    fn to_base58_check(&self) -> String {
+        let first_hash = Sha256::digest(&self);
+        let second_hash = Sha256::digest(&first_hash);
+        let mut with_check = self.iter().cloned().collect::<Vec<u8>>();
+        with_check.extend(second_hash.iter().cloned().take(4));
+        with_check.to_base58()
+    }
 }
 
 
 #[cfg(test)]
 mod tests {
     use super::{FromBase58, ToBase58};
+
+    const INVALID_BASE58: [&'static str; 10] = [
+        "0",
+        "O",
+        "I",
+        "l",
+        "3mJr0",
+        "O3yxU",
+        "3sNI",
+        "4kl8",
+        "s!5<",
+        "t$@mX<*"
+    ];
 
     #[test]
     fn test_from_base58_basic() {
@@ -150,16 +214,34 @@ mod tests {
 
     #[test]
     fn test_from_base58_invalid_char() {
-        assert!("0".from_base58().is_err());
-        assert!("O".from_base58().is_err());
-        assert!("I".from_base58().is_err());
-        assert!("l".from_base58().is_err());
-        assert!("3mJr0".from_base58().is_err());
-        assert!("O3yxU".from_base58().is_err());
-        assert!("3sNI".from_base58().is_err());
-        assert!("4kl8".from_base58().is_err());
-        assert!("s!5<".from_base58().is_err());
-        assert!("t$@mX<*".from_base58().is_err());
+        for s in INVALID_BASE58.iter() {
+            assert!(s.from_base58().is_err());
+        }
+    }
+
+    #[test]
+    fn test_from_base58_check_basic() {
+        assert_eq!("3QJmnh".from_base58_check().unwrap(), b"");
+        assert_eq!("6bdbJ1U".from_base58_check().unwrap(), &[49]);
+        assert_eq!("7VsrQCP".from_base58_check().unwrap(), &[57]);
+        assert_eq!("PWEu9GGN".from_base58_check().unwrap(), &[45, 49]);
+        assert_eq!("RVnPfpC2".from_base58_check().unwrap(), &[49, 49]);
+        assert_eq!("K5zqBMZZTzUbAZQgrt4".from_base58_check().unwrap(), b"1234598760");
+        assert_eq!("LWmP1W82eUos2HWzVn19rapmig4X5dqPWgGFLsUTJ".from_base58_check().unwrap(), b"abcdefghijklmnopqrstuvwxyz");
+    }
+
+    #[test]
+    fn test_from_base58_check_invalid() {
+        // Invalid base58
+        for s in INVALID_BASE58.iter() {
+            assert!(s.from_base58_check().is_err());
+        }
+
+        // Valid base58 but invalid base58check
+        assert_eq!("4SU".from_base58().unwrap(), &[45, 49]);
+        assert!("4SU".from_base58_check().is_err());
+        assert_eq!("3mJr7AoUXx2Wqd".from_base58().unwrap(), b"1234598760");
+        assert!("3mJr7AoUXx2Wqd".from_base58_check().is_err());
     }
 
     #[test]
@@ -194,6 +276,17 @@ mod tests {
     }
 
     #[test]
+    fn test_to_base58_check_basic() {
+        assert_eq!(b"".to_base58_check(), "3QJmnh");
+        assert_eq!(&[49].to_base58_check(), "6bdbJ1U");
+        assert_eq!(&[57].to_base58_check(), "7VsrQCP");
+        assert_eq!(&[45, 49].to_base58_check(), "PWEu9GGN");
+        assert_eq!(&[49, 49].to_base58_check(), "RVnPfpC2");
+        assert_eq!(b"1234598760".to_base58_check(), "K5zqBMZZTzUbAZQgrt4");
+        assert_eq!(b"abcdefghijklmnopqrstuvwxyz".to_base58_check(), "LWmP1W82eUos2HWzVn19rapmig4X5dqPWgGFLsUTJ");
+    }
+
+    #[test]
     fn test_base58_random() {
         use rand::{thread_rng, Rng};
 
@@ -204,6 +297,10 @@ mod tests {
             assert_eq!(v.to_base58()
                         .from_base58()
                         .unwrap(),
+                       v);
+            assert_eq!(v.to_base58_check()
+                           .from_base58_check()
+                           .unwrap(),
                        v);
         }
     }
