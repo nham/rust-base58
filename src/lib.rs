@@ -18,6 +18,8 @@ const FLICKR_ALPHA: &'static[u8] = b"123456789\
                                      abcdefghijkmnopqrstuvwxyz\
                                      ABCDEFGHJKLMNPQRSTUVWXYZ";
 
+pub const CHECKSUM_LEN: usize = 4;
+
 /// A trait for converting base58-encoded values
 pub trait FromBase58 {
     /// Converts the value of `self`, interpreted as base58 encoded data,
@@ -36,7 +38,7 @@ pub enum FromBase58Error {
     /// The input contained a character not part of the base58 alphabet
     InvalidBase58Byte(u8, usize),
     /// The checksum was not correct
-    InvalidBase58Checksum([u8; 4], [u8; 4]),
+    InvalidBase58Checksum([u8; CHECKSUM_LEN], [u8; CHECKSUM_LEN]),
     /// The checksum was not present
     NoBase58Checksum
 }
@@ -106,19 +108,19 @@ impl FromBase58 for [u8] {
     fn from_base58_check(&self) -> Result<Vec<u8>, FromBase58Error> {
         let decoded = self.from_base58()?;
         let length = decoded.len();
-        if length < 4 {
+        if length < CHECKSUM_LEN {
             return Err(NoBase58Checksum)
         }
-        let (content, check) = decoded.split_at(length-4);
+        let (content, check) = decoded.split_at(length - CHECKSUM_LEN);
 
         let first_hash = Sha256::digest(&content);
         let second_hash = Sha256::digest(&first_hash);
-        let (expected_hash, _) = second_hash.split_at(4);
+        let (expected_hash, _) = second_hash.split_at(CHECKSUM_LEN);
 
         if check != expected_hash {
-            let mut a: [u8; 4] = Default::default();
+            let mut a: [u8; CHECKSUM_LEN] = Default::default();
             a.copy_from_slice(&check[..]);
-            let mut b: [u8; 4] = Default::default();
+            let mut b: [u8; CHECKSUM_LEN] = Default::default();
             b.copy_from_slice(&expected_hash[..]);
             return Err(InvalidBase58Checksum(a, b))
         } else {
@@ -169,7 +171,7 @@ impl ToBase58 for [u8] {
         let first_hash = Sha256::digest(&self);
         let second_hash = Sha256::digest(&first_hash);
         let mut with_check = self.iter().cloned().collect::<Vec<u8>>();
-        with_check.extend(second_hash.iter().cloned().take(4));
+        with_check.extend(second_hash.iter().cloned().take(CHECKSUM_LEN));
         with_check.to_base58()
     }
 }
